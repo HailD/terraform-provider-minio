@@ -101,19 +101,102 @@ func TestAccILMPolicy_expireNoncurrentVersion(t *testing.T) {
 		ProviderFactories: testAccProviders,
 		CheckDestroy:      testAccCheckMinioS3BucketDestroy,
 		Steps: []resource.TestStep{
+			// Test noncurrent_expiration with days only
 			{
-				Config: testAccMinioILMPolicyExpireNoncurrentVersion(name),
+				Config: testAccMinioILMPolicyExpireNoncurrentVersionWithDays(name),
 				Check: resource.ComposeTestCheckFunc(
 					testAccCheckMinioILMPolicyExists(resourceName, &lifecycleConfig),
 					testAccCheckMinioLifecycleConfigurationValid(&lifecycleConfig),
 					resource.TestCheckResourceAttr(
-						resourceName, "rule.0.expiration", ""),
+						resourceName, "rule.0.noncurrent_expiration.0.days", "5d"),
+					resource.TestCheckNoResourceAttr(
+						resourceName, "rule.0.noncurrent_expiration.0.newer_versions"),
+				),
+			},
+			// Test noncurrent_expiration with newer_versions only
+			{
+				Config: testAccMinioILMPolicyExpireNoncurrentVersionWithVersions(name),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckMinioILMPolicyExists(resourceName, &lifecycleConfig),
+					testAccCheckMinioLifecycleConfigurationValid(&lifecycleConfig),
+					resource.TestCheckNoResourceAttr(
+						resourceName, "rule.0.noncurrent_expiration.0.days"),
+					resource.TestCheckResourceAttr(
+						resourceName, "rule.0.noncurrent_expiration.0.newer_versions", "4"),
+				),
+			},
+			// Test noncurrent_expiration with both days and newer_versions
+			{
+				Config: testAccMinioILMPolicyExpireNoncurrentVersionWithDaysAndVersions(name),
+				Check: resource.ComposeTestCheckFunc(
+					testAccCheckMinioILMPolicyExists(resourceName, &lifecycleConfig),
+					testAccCheckMinioLifecycleConfigurationValid(&lifecycleConfig),
 					resource.TestCheckResourceAttr(
 						resourceName, "rule.0.noncurrent_expiration.0.days", "5d"),
+					resource.TestCheckResourceAttr(
+						resourceName, "rule.0.noncurrent_expiration.0.newer_versions", "4"),
 				),
 			},
 		},
 	})
+}
+
+// Test configuration for noncurrent_expiration with days only
+func testAccMinioILMPolicyExpireNoncurrentVersionWithDays(randInt string) string {
+	return fmt.Sprintf(`
+resource "minio_s3_bucket" "bucket4" {
+  bucket = "%s"
+  acl    = "public-read"
+}
+resource "minio_ilm_policy" "rule4" {
+  bucket = "${minio_s3_bucket.bucket4.id}"
+  rule {
+	id = "expireNoncurrentVersionDays"
+	noncurrent_expiration {
+	  days = "5d"
+	}
+  }
+}
+`, randInt)
+}
+
+// Test configuration for noncurrent_expiration with newer_versions only
+func testAccMinioILMPolicyExpireNoncurrentVersionWithVersions(randInt string) string {
+	return fmt.Sprintf(`
+resource "minio_s3_bucket" "bucket4" {
+  bucket = "%s"
+  acl    = "public-read"
+}
+resource "minio_ilm_policy" "rule4" {
+  bucket = "${minio_s3_bucket.bucket4.id}"
+  rule {
+	id = "expireNoncurrentVersionVersions"
+	noncurrent_expiration {
+	  newer_versions = 4
+	}
+  }
+}
+`, randInt)
+}
+
+// Test configuration for noncurrent_expiration with both days and newer_versions
+func testAccMinioILMPolicyExpireNoncurrentVersionWithDaysAndVersions(randInt string) string {
+	return fmt.Sprintf(`
+resource "minio_s3_bucket" "bucket4" {
+  bucket = "%s"
+  acl    = "public-read"
+}
+resource "minio_ilm_policy" "rule4" {
+  bucket = "${minio_s3_bucket.bucket4.id}"
+  rule {
+	id = "expireNoncurrentVersionDaysAndVersions"
+	noncurrent_expiration {
+	  days = "5d"
+	  newer_versions = 4
+	}
+  }
+}
+`, randInt)
 }
 
 func TestAccILMPolicy_transition(t *testing.T) {
@@ -373,7 +456,7 @@ resource "minio_iam_service_account" "remote_storage" {
   target_user = "${minio_iam_user.remote_storage.name}"
 
   depends_on = [
-    minio_iam_user_policy_attachment.remote_storage,
+	minio_iam_user_policy_attachment.remote_storage,
   ]
 }
 

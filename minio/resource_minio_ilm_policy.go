@@ -100,7 +100,7 @@ func resourceMinioILMPolicy() *schema.Resource {
 								Schema: map[string]*schema.Schema{
 									"days": {
 										Type:             schema.TypeString,
-										Required:         true,
+										Optional:         true,
 										ValidateDiagFunc: validateILMDays,
 									},
 									"newer_versions": {
@@ -261,11 +261,13 @@ func createLifecycleRule(ruleData map[string]interface{}) (lifecycle.Rule, error
 		return lifecycle.Rule{}, err
 	}
 
+	noncurrentExpiration := parseILMNoncurrentExpiration(ruleData["noncurrent_expiration"])
+
 	return lifecycle.Rule{
 		ID:                          id,
 		Expiration:                  parseILMExpiration(expiration),
 		Transition:                  parseILMTransition(ruleData["transition"]),
-		NoncurrentVersionExpiration: parseILMNoncurrentExpiration(ruleData["noncurrent_expiration"]),
+		NoncurrentVersionExpiration: noncurrentExpiration,
 		NoncurrentVersionTransition: noncurrentTransition,
 		Status:                      "Enabled",
 		RuleFilter:                  filter,
@@ -312,7 +314,7 @@ func minioReadILMPolicy(ctx context.Context, d *schema.ResourceData, meta interf
 		}
 
 		noncurrentExpiration := make([]map[string]interface{}, 0)
-		if r.NoncurrentVersionExpiration.NoncurrentDays != 0 {
+		if r.NoncurrentVersionExpiration.NewerNoncurrentVersions != 0 || r.NoncurrentVersionExpiration.NoncurrentDays != 0 {
 			noncurrentExpiration = append(noncurrentExpiration, map[string]interface{}{
 				"days":           fmt.Sprintf("%dd", r.NoncurrentVersionExpiration.NoncurrentDays),
 				"newer_versions": r.NoncurrentVersionExpiration.NewerNoncurrentVersions,
@@ -475,21 +477,20 @@ func parseILMNoncurrentExpiration(noncurrentExpiration interface{}) lifecycle.No
 		return lifecycle.NoncurrentVersionExpiration{}
 	}
 
-	days, ok := t["days"].(string)
-	if !ok || days == "" {
-		return lifecycle.NoncurrentVersionExpiration{}
-	}
+	var expiration lifecycle.NoncurrentVersionExpiration
 
-	var daysInt int
-	if _, err := fmt.Sscanf(days, "%dd", &daysInt); err == nil {
-		newerVersions, _ := t["newer_versions"].(int) // Optional field
-		return lifecycle.NoncurrentVersionExpiration{
-			NoncurrentDays:          lifecycle.ExpirationDays(daysInt),
-			NewerNoncurrentVersions: newerVersions,
+	if days, ok := t["days"].(string); ok && days != "" {
+		var daysInt int
+		if _, err := fmt.Sscanf(days, "%dd", &daysInt); err == nil {
+			expiration.NoncurrentDays = lifecycle.ExpirationDays(daysInt)
 		}
 	}
 
-	return lifecycle.NoncurrentVersionExpiration{}
+	if newerVersions, ok := t["newer_versions"].(int); ok && newerVersions > 0 {
+		expiration.NewerNoncurrentVersions = newerVersions
+	}
+
+	return expiration
 }
 
 func getStringValue(m map[string]interface{}, key string) (string, bool) {
